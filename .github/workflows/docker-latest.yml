@@ -1,0 +1,105 @@
+name: Build and Publish Docker latest
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: 5etools-2014
+  IMAGE_ID_SRC: ghcr.io/${{ github.repository_owner }}/5etools-2014-src
+  IMAGE_ID_IMG: ghcr.io/5etools-mirror-3/5etools-2014-img
+
+concurrency:
+  group: docker-latest
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Free Disk Space
+        uses: endersonmenezes/free-disk-space@v3
+        with:
+          remove_android: true
+          remove_dotnet: true
+          remove_haskell: true
+          remove_tool_cache: true
+          remove_swap: true
+          remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
+          remove_packages_one_command: true
+          remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle"
+          rm_cmd: "rmz"
+          rmz_version: "3.1.1"
+
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build AMD64 image incrementally
+        run: |
+          set -Eeuo pipefail
+
+          docker pull "$IMAGE_ID_SRC:latest"
+          docker pull "$IMAGE_ID_IMG:latest"
+
+          SAVE_CMD=$(docker inspect --format='{{json .Config.Cmd}}' "$IMAGE_ID_SRC:latest")
+          bash ./.github/create-rsync-filter.sh
+
+          docker run --rm \
+            -v "$(pwd)":/tmp/5et-new \
+            "$IMAGE_ID_IMG:latest" \
+            rsync -rlcv --filter='dir-merge /tmp/5et-new/.rsync-filter' \
+            /var/www/localhost/htdocs/img /tmp/5et-new/
+
+          docker rmi $(docker images -q "$IMAGE_ID_IMG"':*')
+
+          CONTAINER_ID=$(docker run -d \
+            -v "$(pwd)":/tmp/5et-new \
+            "$IMAGE_ID_SRC:latest" \
+            rsync -rlcvF --delete-excluded \
+            /tmp/5et-new/ /var/www/localhost/htdocs/)
+
+          docker logs -f "$CONTAINER_ID"
+          docker commit -c "CMD $SAVE_CMD" "$CONTAINER_ID" "$IMAGE_NAME-src"
+          docker tag "$IMAGE_NAME-src" "$IMAGE_ID_SRC:latest-amd64"
+          docker push "$IMAGE_ID_SRC:latest-amd64"
+
+          # The asset image is copied into the workspace for the incremental
+          # build, but the ARM64 Dockerfile copies it from its build stage.
+          # Do not include a second copy in the ARM64 build context.
+          sudo rm -rf -- img
+
+      - name: Build and publish ARM64 image
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            --tag "$IMAGE_ID_SRC:latest-arm64" \
+            --push \
+            --provenance=false \
+            .
+
+      - name: Publish multi-platform manifest
+        run: |
+          docker buildx imagetools create \
+            --tag "$IMAGE_ID_SRC:latest" \
+            "$IMAGE_ID_SRC:latest-amd64" \
+            "$IMAGE_ID_SRC:latest-arm64"

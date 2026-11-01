@@ -98,6 +98,12 @@ jobs:
             run: |
                npm run build:seo -- ${{ github.ref_name }}
 
+         -  name: Set up QEMU
+            uses: docker/setup-qemu-action@v3
+
+         -  name: Set up Docker Buildx
+            uses: docker/setup-buildx-action@v3
+
          # region See: https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions#upgrading-a-workflow-that-accesses-ghcrio
          # FIXME `timeout-minutes` due to `sleep` hack
          -  name: Build Image
@@ -163,4 +169,38 @@ jobs:
                [[ "${{ github.ref }}" == "refs/tags/"* ]] && docker tag $IMAGE_NAME-src $IMAGE_ID_SRC:latest
                docker push $IMAGE_ID_SRC:$IMAGE_VERSION
                docker push $IMAGE_ID_SRC:latest
+
+               # Publish the existing AMD64 image under an architecture-specific tag.
+               docker tag $IMAGE_NAME-src $IMAGE_ID_SRC:$IMAGE_VERSION-amd64
+               docker push $IMAGE_ID_SRC:$IMAGE_VERSION-amd64
+
+               if [[ "${{ github.ref }}" == "refs/tags/"* ]]
+               then
+                  docker tag $IMAGE_NAME-src $IMAGE_ID_SRC:latest-amd64
+                  docker push $IMAGE_ID_SRC:latest-amd64
+               fi
+
+
+         -  name: Build ARM64 Image
+            run: |
+               docker buildx build \
+                  --platform linux/arm64 \
+                  --tag $IMAGE_ID_SRC:$IMAGE_VERSION-arm64 \
+                  --push \
+                  .
+
+         -  name: Publish Multi-Architecture Manifest
+            run: |
+               docker buildx imagetools create \
+                  --tag $IMAGE_ID_SRC:$IMAGE_VERSION \
+                  $IMAGE_ID_SRC:$IMAGE_VERSION-amd64 \
+                  $IMAGE_ID_SRC:$IMAGE_VERSION-arm64
+
+               if [[ "${{ github.ref }}" == "refs/tags/"* ]]
+               then
+                  docker buildx imagetools create \
+                     --tag $IMAGE_ID_SRC:latest \
+                     $IMAGE_ID_SRC:latest-amd64 \
+                     $IMAGE_ID_SRC:$IMAGE_VERSION-arm64
+               fi
          # endregion
