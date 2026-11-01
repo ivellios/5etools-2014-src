@@ -58,28 +58,32 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          docker pull "$IMAGE_ID_SRC:latest"
           docker pull "$IMAGE_ID_IMG:latest"
 
-          SAVE_CMD=$(docker inspect --format='{{json .Config.Cmd}}' "$IMAGE_ID_SRC:latest")
-          bash ./.github/create-rsync-filter.sh
+          if docker pull "$IMAGE_ID_SRC:latest"; then
+            SAVE_CMD=$(docker inspect --format='{{json .Config.Cmd}}' "$IMAGE_ID_SRC:latest")
+            bash ./.github/create-rsync-filter.sh
 
-          docker run --rm \
-            -v "$(pwd)":/tmp/5et-new \
-            "$IMAGE_ID_IMG:latest" \
-            rsync -rlcv --filter='dir-merge /tmp/5et-new/.rsync-filter' \
-            /var/www/localhost/htdocs/img /tmp/5et-new/
+            docker run --rm \
+              -v "$(pwd)":/tmp/5et-new \
+              "$IMAGE_ID_IMG:latest" \
+              rsync -rlcv --filter='dir-merge /tmp/5et-new/.rsync-filter' \
+              /var/www/localhost/htdocs/img /tmp/5et-new/
 
-          docker rmi $(docker images -q "$IMAGE_ID_IMG"':*')
+            docker rmi $(docker images -q "$IMAGE_ID_IMG"':*')
 
-          CONTAINER_ID=$(docker run -d \
-            -v "$(pwd)":/tmp/5et-new \
-            "$IMAGE_ID_SRC:latest" \
-            rsync -rlcvF --delete-excluded \
-            /tmp/5et-new/ /var/www/localhost/htdocs/)
+            CONTAINER_ID=$(docker run -d \
+              -v "$(pwd)":/tmp/5et-new \
+              "$IMAGE_ID_SRC:latest" \
+              rsync -rlcvF --delete-excluded \
+              /tmp/5et-new/ /var/www/localhost/htdocs/)
 
-          docker logs -f "$CONTAINER_ID"
-          docker commit -c "CMD $SAVE_CMD" "$CONTAINER_ID" "$IMAGE_NAME-src"
+            docker logs -f "$CONTAINER_ID"
+            docker commit -c "CMD $SAVE_CMD" "$CONTAINER_ID" "$IMAGE_NAME-src"
+          else
+            docker build --platform linux/amd64 --tag "$IMAGE_NAME-src" .
+          fi
+
           docker tag "$IMAGE_NAME-src" "$IMAGE_ID_SRC:latest-amd64"
           docker push "$IMAGE_ID_SRC:latest-amd64"
 
