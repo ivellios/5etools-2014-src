@@ -75,17 +75,56 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 		this._pPopulateRow_bindParentRowStatColsIsEditableHook({comp, entity, mon, fluff, fnsCleanup});
 
 		const wrpLhs = veT`<div class="dm-init__row-lhs"></div>`.vee.appendTo(wrpRow);
+		const iptSelect = veT`<input class="dm-init__row-select dm-init-lockable" type="checkbox" title="Select for bulk actions" aria-label="Select for bulk actions">`
+			.vee.prop("checked", this._comp._isBulkRowSelected({rowId: entity.id}));
+		const setIsSelected = isSelected => {
+			iptSelect.vee.prop("checked", isSelected);
+			wrpRow.vee.toggleClass("dm-init__row-selected", isSelected);
+			this._comp._setBulkRowSelected({rowId: entity.id, isSelected});
+		};
+		iptSelect.vee.onn("change", () => setIsSelected(iptSelect.vee.prop("checked")));
+		const wrpSelect = veT`<div class="dm-init__wrp-select">${iptSelect}</div>`
+			.vee.onn("click", evt => {
+				if (evt.target === iptSelect) return;
+				setIsSelected(!iptSelect.vee.prop("checked"));
+			})
+			.vee.appendTo(wrpLhs);
+		wrpRow.vee.toggleClass("dm-init__row-selected", this._comp._isBulkRowSelected({rowId: entity.id}));
+		wrpLhs.vee.onn("click", evt => {
+			if (!evt.shiftKey || !evt.target.closest(".dm-init__ipt-name, .dm-init__wrp-creature")) return;
+			evt.preventDefault();
+			evt.stopPropagation();
+			setIsSelected(!iptSelect.vee.prop("checked"));
+		});
 
 		this._pPopulateRow_player({comp, wrpLhs, isMon});
 		this._pPopulateRow_monster({comp, wrpLhs, isMon, mon, fluff});
 
 		this._pPopulateRow_conditions({comp, wrpLhs});
+		const {wrp: wrpBulkMultiplier, btns: btnsBulkMultiplier} = this._pPopulateRow_bulkDamageMultiplier({rowId: entity.id, wrpLhs});
 
 		this._pPopulateRow_statsCols({comp, wrpRow, mon, fnsCleanup});
 
 		const wrpRhs = veT`<div class="dm-init__row-rhs"></div>`.vee.appendTo(wrpRow);
 
-		this._pPopulateRow_hp({comp, wrpRhs, fnsCleanup});
+		const {wrpHpCurrent, iptBulkTotal} = this._pPopulateRow_hp({comp, rowId: entity.id, wrpRhs, fnsCleanup});
+		const fnUpdateBulkDamage = () => {
+			const isSelected = this._comp._isBulkRowSelected({rowId: entity.id});
+			const isDamageMode = this._comp._dmInitBulkDamageMode && isSelected;
+			const draft = this._comp._dmInitBulkDamageDrafts.get(entity.id);
+
+			wrpBulkMultiplier.vee.toggle(isDamageMode);
+			wrpRow.vee.toggleClass("dm-init__row-bulk-mode", this._comp._dmInitBulkDamageMode);
+			wrpRow.vee.toggleClass("dm-init__row-bulk-inactive", this._comp._dmInitBulkDamageMode && !isSelected);
+			wrpHpCurrent.vee.toggle(!isDamageMode);
+			iptBulkTotal.vee.toggle(isDamageMode);
+
+			if (!draft) return;
+			iptBulkTotal.vee.val(draft.total ?? "");
+			btnsBulkMultiplier.forEach(({btn, multiplier}) => btn.vee.toggleClass("ve-btn-primary", draft.multiplier === multiplier));
+		};
+		this._comp._registerBulkDamageRow({rowId: entity.id, comp, fnUpdate: fnUpdateBulkDamage});
+		fnsCleanup.push(() => this._comp._dmInitBulkDamageRowHooks.delete(entity.id));
 		this._pPopulateRow_initiative({comp, wrpRhs});
 		this._pPopulateRow_btns({comp, entity, wrpRhs});
 
@@ -112,6 +151,142 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 			},
 			fnsCleanup,
 		};
+	}
+
+	_pPopulateRow_bulkDamageMultiplier ({rowId, wrpLhs}) {
+		const metas = [
+			{label: "x0", multiplier: 0},
+			{label: "x½", multiplier: 0.5},
+			{label: "x1", multiplier: 1},
+			{label: "x2", multiplier: 2},
+		];
+		const btns = metas.map(({label, multiplier}) => ({
+			btn: veT`<button class="ve-btn ve-btn-default ve-btn-xs dm-init-lockable" title="${label}" aria-label="${label}">${label}</button>`
+				.vee.onn("click", () => this._comp._setBulkDamageRowMultiplier({rowId, multiplier})),
+			multiplier,
+		}));
+		const wrp = veT`<div class="dm-init__bulk-multiplier">${btns.map(({btn}) => btn)}</div>`
+			.vee.appendTo(wrpLhs);
+
+		return {wrp, btns};
+	}
+
+	_pOpenHpOverlay ({comp, iptHpCurrent}) {
+		if (this._comp._state.isLocked) return;
+
+		this._comp._dmInitHpOverlay?.close();
+
+		const initialValue = comp._state.hpCurrent;
+		const initialValueForMath = initialValue ?? 0;
+		let draftDelta = 0;
+		let draftTotal = initialValue;
+		const wrpOverlay = veT`<div class="dm-init__hp-overlay" role="dialog" aria-label="Modify hit points">
+			<div class="dm-init__hp-overlay__row dm-init__hp-overlay__row-multiplier">
+				<label><input class="dm-init__hp-overlay__cb-half" type="checkbox"> ½</label>
+				<label><input class="dm-init__hp-overlay__cb-double" type="checkbox"> ×2</label>
+			</div>
+			<div class="dm-init__hp-overlay__row">
+				<button class="ve-btn ve-btn-default ve-btn-xs" title="Set minimum hit points" aria-label="Set minimum hit points">MIN</button>
+				<button class="ve-btn ve-btn-default ve-btn-xs" title="Decrease by 10" aria-label="Decrease by 10">-10</button>
+				<button class="ve-btn ve-btn-default ve-btn-xs" title="Decrease by 5" aria-label="Decrease by 5">-5</button>
+				<button class="ve-btn ve-btn-default ve-btn-xs" title="Decrease by 1" aria-label="Decrease by 1">-1</button>
+				<input class="ve-form-control ve-input-sm dm-init__hp-overlay__ipt-delta" aria-label="Hit point adjustment" type="number">
+				<button class="ve-btn ve-btn-default ve-btn-xs" title="Increase by 1" aria-label="Increase by 1">+1</button>
+				<button class="ve-btn ve-btn-default ve-btn-xs" title="Increase by 5" aria-label="Increase by 5">+5</button>
+				<button class="ve-btn ve-btn-default ve-btn-xs" title="Increase by 10" aria-label="Increase by 10">+10</button>
+				<button class="ve-btn ve-btn-default ve-btn-xs" title="Set maximum hit points" aria-label="Set maximum hit points">MAX</button>
+			</div>
+			<div class="dm-init__hp-overlay__row dm-init__hp-overlay__row-total">
+				<button class="ve-btn ve-btn-danger ve-btn-xs" title="Cancel" aria-label="Cancel"><span class="glyphicon glyphicon-remove"></span></button>
+				<input class="ve-form-control ve-input-sm dm-init__hp-overlay__ipt-total" aria-label="Total hit points" type="number">
+				<button class="ve-btn ve-btn-success ve-btn-xs" title="Confirm" aria-label="Confirm"><span class="glyphicon glyphicon-ok"></span></button>
+			</div>
+		</div>`;
+		const ipts = wrpOverlay.vee.findAll("input");
+		const cbHalf = ipts[0];
+		const cbDouble = ipts[1];
+		const iptDelta = ipts[2];
+		const iptTotal = ipts[3];
+		const btns = wrpOverlay.vee.findAll("button");
+
+		const getClampedValue = value => {
+			if (!Number.isFinite(value)) return null;
+			if (!this._comp._state.isInvertWoundDirection || comp._state.hpMax == null) return Math.max(0, value);
+			return Math.max(0, Math.min(comp._state.hpMax, value));
+		};
+		const getMultiplier = () => cbHalf.checked ? 0.5 : cbDouble.checked ? 2 : 1;
+		const getEffectiveDelta = value => Math.sign(value) * Math.floor(Math.abs(value) * getMultiplier());
+		const setDraftDelta = value => {
+			draftDelta = Number.isFinite(value) ? value : 0;
+			draftTotal = initialValue == null && draftDelta === 0
+				? null
+				: getClampedValue(initialValueForMath + getEffectiveDelta(draftDelta));
+			iptDelta.value = draftDelta;
+			iptTotal.value = draftTotal ?? "";
+		};
+		const setDraftTotal = value => {
+			const total = getClampedValue(value);
+			if (total == null) return;
+			draftTotal = total;
+			draftDelta = total - initialValueForMath;
+			iptDelta.value = draftDelta;
+			iptTotal.value = total;
+		};
+		const close = () => {
+			if (this._comp._dmInitHpOverlay?.overlay !== wrpOverlay) return;
+			wrpOverlay.remove();
+			this._comp._dmInitHpOverlay = null;
+		};
+
+		btns[0].addEventListener("click", () => setDraftTotal(0));
+		btns[1].addEventListener("click", () => setDraftDelta(draftDelta - 10));
+		btns[2].addEventListener("click", () => setDraftDelta(draftDelta - 5));
+		btns[3].addEventListener("click", () => setDraftDelta(draftDelta - 1));
+		btns[4].addEventListener("click", () => setDraftDelta(draftDelta + 1));
+		btns[5].addEventListener("click", () => setDraftDelta(draftDelta + 5));
+		btns[6].addEventListener("click", () => setDraftDelta(draftDelta + 10));
+		btns[7].addEventListener("click", () => {
+			if (comp._state.hpMax == null) return;
+			setDraftTotal(comp._state.hpMax);
+		});
+		btns[8].addEventListener("click", close);
+		btns[9].addEventListener("click", () => {
+			const total = Number(iptTotal.value);
+			if (!iptTotal.value.trim() || !Number.isFinite(total)) return;
+			comp._state.hpCurrent = getClampedValue(total);
+			close();
+		});
+		cbHalf.addEventListener("change", () => {
+			if (cbHalf.checked) cbDouble.checked = false;
+			setDraftDelta(draftDelta);
+		});
+		cbDouble.addEventListener("change", () => {
+			if (cbDouble.checked) cbHalf.checked = false;
+			setDraftDelta(draftDelta);
+		});
+		iptDelta.addEventListener("input", () => {
+			const delta = Number(iptDelta.value);
+			if (Number.isFinite(delta)) setDraftDelta(delta);
+		});
+		iptTotal.addEventListener("input", () => setDraftTotal(Number(iptTotal.value)));
+		[iptDelta, iptTotal].forEach(ipt => ipt.addEventListener("keydown", evt => {
+			if (evt.key === "Enter") btns[9].click();
+			if (evt.key === "Escape") close();
+		}));
+
+		wrpOverlay.vee.appendTo(document.body);
+		setDraftDelta(0);
+		const rect = iptHpCurrent.getBoundingClientRect();
+		const overlayRect = wrpOverlay.getBoundingClientRect();
+		const left = Math.max(4, Math.min(
+			window.innerWidth - overlayRect.width - 4,
+			rect.left + (rect.width - overlayRect.width) / 2,
+		));
+		wrpOverlay.style.left = `${left}px`;
+		wrpOverlay.style.top = `${Math.max(4, rect.top - overlayRect.height - 4)}px`;
+		this._comp._dmInitHpOverlay = {overlay: wrpOverlay, close};
+		iptDelta.focus();
+		iptDelta.select();
 	}
 
 	/* ----- */
@@ -210,7 +385,7 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 
 	/* ----- */
 
-	_pPopulateRow_hp ({comp, wrpRhs, fnsCleanup}) {
+	_pPopulateRow_hp ({comp, rowId, wrpRhs, fnsCleanup}) {
 		const iptHpCurrent = ComponentUiUtil.getIptNumber(
 			comp,
 			"hpCurrent",
@@ -221,7 +396,18 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 				html: `<input class="ve-form-control ve-input-sm hp dm-init__row-input ve-text-right ve-w-40p ve-mr-0 ve-br-0">`,
 			},
 		)
-			.vee.onn("click", () => iptHpCurrent.select());
+			.vee.onn("click", () => {
+				if (this._comp._dmInitBulkDamageMode) return;
+				this._pOpenHpOverlay({comp, iptHpCurrent});
+			});
+		const iptBulkTotal = veT`<input class="ve-form-control ve-input-sm dm-init__bulk-hp-total dm-init-lockable" aria-label="Bulk total hit points" type="number">`;
+		iptBulkTotal.vee.onn("input", () => {
+			const raw = iptBulkTotal.vee.val();
+			this._comp._setBulkDamageRowTotal({
+				rowId,
+				total: raw == null || !`${raw}`.trim() ? null : Number(raw),
+			});
+		});
 
 		const iptHpMax = ComponentUiUtil.getIptNumber(
 			comp,
@@ -256,12 +442,18 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 		this._comp._addHookBase("isInvertWoundDirection", hkHpColors)();
 		fnsCleanup.push(() => this._comp._removeHookBase("isInvertWoundDirection", hkHpColors));
 
+		const wrpHpCurrent = veT`<div class="ve-text-right">${iptHpCurrent}</div>`;
 		veT`<div class="ve-flex ve-relative ve-mr-3p">
-			<div class="ve-text-right">${iptHpCurrent}</div>
+			${wrpHpCurrent}
+			<div class="ve-text-right">${iptBulkTotal}</div>
 			<div class="dm-init__sep-fields-slash ve-flex-vh-center">/</div>
 			<div class="ve-text-left">${iptHpMax}</div>
 		</div>`
 			.vee.appendTo(wrpRhs);
+
+		fnsCleanup.push(() => this._comp._dmInitHpOverlay?.close());
+
+		return {wrpHpCurrent, iptBulkTotal};
 	}
 
 	/* ----- */
