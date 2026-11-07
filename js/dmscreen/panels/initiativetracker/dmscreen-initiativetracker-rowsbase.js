@@ -190,7 +190,7 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 				<button class="ve-btn ve-btn-default ve-btn-xs" title="Decrease by 10" aria-label="Decrease by 10">-10</button>
 				<button class="ve-btn ve-btn-default ve-btn-xs" title="Decrease by 5" aria-label="Decrease by 5">-5</button>
 				<button class="ve-btn ve-btn-default ve-btn-xs" title="Decrease by 1" aria-label="Decrease by 1">-1</button>
-				<input class="ve-form-control ve-input-sm dm-init__hp-overlay__ipt-delta" aria-label="Hit point adjustment" type="number">
+				<input class="ve-form-control ve-input-sm dm-init__hp-overlay__ipt-delta" aria-label="Hit point adjustment" type="text" inputmode="decimal">
 				<button class="ve-btn ve-btn-default ve-btn-xs" title="Increase by 1" aria-label="Increase by 1">+1</button>
 				<button class="ve-btn ve-btn-default ve-btn-xs" title="Increase by 5" aria-label="Increase by 5">+5</button>
 				<button class="ve-btn ve-btn-default ve-btn-xs" title="Increase by 10" aria-label="Increase by 10">+10</button>
@@ -265,7 +265,7 @@ export class RenderableCollectionRowDataBase extends RenderableCollectionAsyncGe
 			setDraftDelta(draftDelta);
 		});
 		iptDelta.addEventListener("input", () => {
-			const delta = Number(iptDelta.value);
+			const delta = UiUtil.strToNumber(iptDelta.value, NaN, {fallbackOnNaN: NaN});
 			if (Number.isFinite(delta)) setDraftDelta(delta);
 		});
 		iptTotal.addEventListener("input", () => setDraftTotal(Number(iptTotal.value)));
