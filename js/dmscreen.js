@@ -3,6 +3,8 @@ import {DmMapper} from "./dmscreen/panels/dmscreen-panelapp-mapper.js";
 import {TimerTrackerMoonSpriteLoader} from "./dmscreen/panels/dmscreen-panelapp-timetracker.js";
 import {
 	PanelContentManager_Counter,
+	PanelContentManager_PlayerReference,
+	PanelContentManager_PlayerStrip,
 	PanelContentManager_InitiativeTracker,
 	PanelContentManager_InitiativeTrackerCreatureViewer,
 	PanelContentManager_InitiativeTrackerPlayerViewV0,
@@ -39,6 +41,7 @@ class Board {
 
 		this._idSaveSlotActive = "1";
 		this._saveSlotStates = {[this._idSaveSlotActive]: {}};
+		this._playerReferenceData = null;
 
 		this.nextId = 1;
 		this.hoveringPanel = null;
@@ -590,12 +593,25 @@ class Board {
 	}
 
 	_getSaveSlotState () {
-		return {
+		const out = {
 			// n -- name
 			// ns -- short name
 			ps: Object.values(this.panels).map(p => p.getSaveableState()),
 			ex: this.exiledPanels.map(p => p.getSaveableState()),
 		};
+		if (this._playerReferenceData != null) out.pr = MiscUtil.copyFast(this._playerReferenceData);
+		return out;
+	}
+
+	getPlayerReferenceData () {
+		return this._playerReferenceData == null ? null : MiscUtil.copyFast(this._playerReferenceData);
+	}
+
+	setPlayerReferenceData (rows, {sourceId = null, isSilent = false} = {}) {
+		this._playerReferenceData = MiscUtil.copyFast(rows || []);
+		if (isSilent) return;
+		this.doSaveStateDebounced();
+		this.fireBoardEvent({type: "playerReferenceData", payload: {rows: this.getPlayerReferenceData(), sourceId}});
 	}
 
 	/** One-way sync from sidebar */
@@ -759,6 +775,7 @@ class Board {
 		this._saveSlotStates = state.sls ?? {[this._idSaveSlotActive]: {}};
 
 		const saveSlotStateActive = state.sls?.[state.sla] || {};
+		this._playerReferenceData = saveSlotStateActive.pr == null ? null : MiscUtil.copyFast(saveSlotStateActive.pr);
 
 		// re-exile
 		const toReExile = (saveSlotStateActive.ex || [])
@@ -1424,6 +1441,30 @@ class AddMenuSpecialTab extends AddMenuTab {
 			veT`<div class="ve-ui-modal__row">
 			<span>Initiative Tracker</span>
 			${btnTracker}
+			</div>`.vee.appendTo(eleTab);
+
+			const btnPlayerReference = veT`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`
+				.vee.onn("click", async () => {
+					const pcm = new PanelContentManager_PlayerReference({board: this._board, panel: this.menu.pnl});
+					await pcm.pDoPopulate();
+					this.menu.doClose();
+				});
+
+			veT`<div class="ve-ui-modal__row">
+				<span>Player Reference</span>
+				${btnPlayerReference}
+			</div>`.vee.appendTo(eleTab);
+
+			const btnPlayerStrip = veT`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`
+				.vee.onn("click", async () => {
+					const pcm = new PanelContentManager_PlayerStrip({board: this._board, panel: this.menu.pnl});
+					await pcm.pDoPopulate();
+					this.menu.doClose();
+				});
+
+			veT`<div class="ve-ui-modal__row">
+				<span>Player Strip</span>
+				${btnPlayerStrip}
 			</div>`.vee.appendTo(eleTab);
 
 			const btnTrackerCreatureViewer = veT`<button class="ve-btn ve-btn-primary ve-btn-sm">Add</button>`

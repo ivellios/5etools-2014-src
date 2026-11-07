@@ -5,12 +5,15 @@ import {
 	PANEL_TYP_INITIATIVE_TRACKER, PANEL_TYP_INITIATIVE_TRACKER_CREATURE_VIEWER,
 	PANEL_TYP_INITIATIVE_TRACKER_PLAYER_V0,
 	PANEL_TYP_INITIATIVE_TRACKER_PLAYER_V1, PANEL_TYP_MONEY_CONVERTER, PANEL_TYP_TEXTBOX, PANEL_TYP_TIME_TRACKER, PANEL_TYP_TUBE, PANEL_TYP_TWITCH, PANEL_TYP_TWITCH_CHAT, PANEL_TYP_UNIT_CONVERTER,
+	PANEL_TYP_PLAYER_REFERENCE,
+	PANEL_TYP_PLAYER_STRIP,
 } from "../dmscreen-consts.js";
 import {InitiativeTracker} from "./initiativetracker/dmscreen-initiativetracker.js";
 import {DmScreenPanelAppGenericEmbed} from "./dmscreen-panelapp-genericembed.js";
 import {InitiativeTrackerPlayerV0, InitiativeTrackerPlayerV1} from "./dmscreen-panelapp-playerinitiativetracker.js";
 import {InitiativeTrackerCreatureViewer} from "../dmscreen-initiativetrackercreatureviewer.js";
 import {Counter} from "./dmscreen-panelapp-counter.js";
+import {PlayerReference, PlayerStrip} from "./dmscreen-panelapp-playerreference.js";
 import {NoteBox} from "./dmscreen-panelapp-notebox.js";
 import {UnitConverter} from "./dmscreen-panelapp-unitconverter.js";
 import {MoneyConverter} from "./dmscreen-panelapp-moneyconverter.js";
@@ -191,6 +194,28 @@ export class PanelContentManager_Counter extends _PanelContentManager {
 
 	_getPanelApp ({state}) {
 		return Counter.getPanelApp({board: this._board, savedState: state});
+	}
+}
+
+export class PanelContentManager_PlayerReference extends _PanelContentManager {
+	static _PANEL_TYPE = PANEL_TYP_PLAYER_REFERENCE;
+	static _TITLE = "Player Reference";
+
+	static _ = this._register();
+
+	_getPanelApp ({state}) {
+		return PlayerReference.getPanelApp({board: this._board, savedState: state});
+	}
+}
+
+export class PanelContentManager_PlayerStrip extends _PanelContentManager {
+	static _PANEL_TYPE = PANEL_TYP_PLAYER_STRIP;
+	static _TITLE = "Player Strip";
+
+	static _ = this._register();
+
+	_getPanelApp ({state}) {
+		return PlayerStrip.getPanelApp({board: this._board, savedState: state});
 	}
 }
 
